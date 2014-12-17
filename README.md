@@ -1,7 +1,7 @@
 
-# LowlaDB-Node-PostgreSql #
+# LowlaDB-Node-PostgreSQL #
 
-> A PostgreSql Datastore for LowlaDB on Node servers.
+> A PostgreSQL Datastore for LowlaDB on Node.js servers.
 
 ## Installation ##
 
@@ -29,10 +29,10 @@ The `PostgreSqlDatastore` constructor takes an optional configuration object.  T
 
 ```js
 {
-  // A node-postgre (pg) client connected to a database to use, or falsey (omitted) to use postgreUrl below instead
+  // A node-postgres (pg) client connected to a database to use, or falsey (omitted) to use postgreUrl below instead
   db: false,
 
-  // The PostgreSql URL to connect to if db was not specified
+  // The PostgreSQL URL to connect to if db was not specified
   postgreUrl: 'postgres://[<user>:<password>@]localhost/lowladb',
 
   // Where to send log output
@@ -64,7 +64,7 @@ ALTER TABLE todos
 
 The example uses the default postgres id as the table owner; modify as appropriate.
 
-For lowladb-node to use PostgreSql datastore for tracking sync events, the following tables should be defined as well:
+For lowladb-node to use PostgreSQL datastore for tracking sync events, the following tables should be defined as well:
 
 ```SQL
 CREATE TABLE "lowlaSequence"
