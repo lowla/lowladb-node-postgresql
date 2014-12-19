@@ -596,20 +596,23 @@ describe('pgTestDatastore', function () {
               a: 99,
               b: 5,
               _version: 2   //todo this wasn't in the mongo test. but it's the adapters job, not ds...
+            },
+            $unset: {
+              b:""
             }
           };
           var pk = {pk_one:doc.pk_one, pk_two:doc.pk_two, pk_three:doc.pk_three};
           return _ds.updateDocumentByOperations(testUtil.createLowlaId(_dbName, 'TestCollection', pk), docs[0]._version,  ops);
         }).then(function(newDoc){
           newDoc.a.should.equal(99);
-          newDoc.b.should.equal(5);
+          should.equal(newDoc.b, null);
           newDoc.name.should.equal('foo1');  //unmodified
           newDoc._version.should.equal(2);
           return _dbUtil.findDocs(_db, 'TestCollection', {});
         }).then(function(docs) {
           docs.length.should.equal(1);
           docs[0].a.should.equal(99);
-          docs[0].b.should.equal(5);
+          should.equal(docs[0].b, null);
           docs[0].name.should.equal('foo1');  //unmodified
           docs[0]._version.should.equal(2);
         });
