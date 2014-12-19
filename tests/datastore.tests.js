@@ -58,7 +58,11 @@ describe('pgTestDatastore', function () {
     { name: 'date',
       dataType: 'date'},
     { name: 'timestamp',
-      dataType: 'timestamp'}
+      dataType: 'timestamp'},
+    { name:'binaryval',
+      dataType: 'bytea'},
+    { name:'jsonval',
+      dataType: 'json'}
   ];
   var pks = ['pk_one', 'pk_two', 'pk_three'];
   beforeEach(function (done) {
@@ -84,7 +88,18 @@ describe('pgTestDatastore', function () {
       })
   });
 
-  describe.skip('Special data types', function () {
+  describe('Special data types', function () {
+
+    var png_buff, txt_buff;
+    before(function(){
+      return testUtil.readFile('test.png').then(function(filedata) {
+        png_buff = filedata;
+      }).then(function(){
+        return testUtil.readFile('test.txt').then(function(filedata) {
+          txt_buff = filedata;
+        });
+      });
+    });
 
     it('encodes a date (timestamp)', function () {
       var msDate = 132215400000;
@@ -106,8 +121,8 @@ describe('pgTestDatastore', function () {
     });
 
     it('encodes a date (no time)', function () {
-      var msDate = 132215400000;
-      var doc = {pk_one:'one', pk_two:2, pk_three:'3',  a: 1, _version:1, date: new Date(msDate)};
+      var adate = new Date(1973, 1, 31);
+      var doc = {pk_one:'one', pk_two:2, pk_three:'3',  a: 1, _version:1, date: adate};
       return _dbUtil.insertDocs(_db, "TestCollection", [doc])
         .then(function () {
           return _dbUtil.findDocs(_db, 'TestCollection', {});
@@ -119,8 +134,7 @@ describe('pgTestDatastore', function () {
           date.should.have.property('_bsonType');
           date.should.have.property('millis');
           date._bsonType.should.equal('Date');
-          date.millis.should.equal(msDate);
-
+          date.millis.should.equal(adate.getTime());
         });
     });
 
@@ -133,46 +147,9 @@ describe('pgTestDatastore', function () {
       date.getTime().should.equal(msDate);
     });
 
-    it('encodes embedded docs containing dates', function () {
-      var msDate = 132215400000;
-      var doc = { _id: '1234', a: 1, _version: 1,
-        date: new Date(msDate),
-        embed1:{ a: 1, date: new Date(msDate),
-          embed2:{ a: 1, date: new Date(msDate),
-            embed3:{a: 1, date: new Date(msDate)}
-          }
-        },
-        end:true
-      };
-      return _dbUtil.insertDocs(_db, "TestCollection", doc)
-        .then(function () {
-          return _dbUtil.findDocs(_db, 'TestCollection', {});
-        }).then(function (docs) {
-          var d = docs[0];
-          d = _ds.encodeSpecialTypes(d);
-          d.date.should.not.be.instanceOf(Date);
-          d.date.should.have.property('_bsonType');
-          d.date.should.have.property('millis');
-          d.date._bsonType.should.equal('Date');
-          d.date.millis.should.equal(msDate);
-          d.embed1.date.should.not.be.instanceOf(Date);
-          d.embed1.date.should.have.property('_bsonType');
-          d.embed1.date.should.have.property('millis');
-          d.embed1.date._bsonType.should.equal('Date');
-          d.embed1.date.millis.should.equal(msDate);
-          d.embed1.embed2.date.should.not.be.instanceOf(Date);
-          d.embed1.embed2.date.should.have.property('_bsonType');
-          d.embed1.embed2.date.should.have.property('millis');
-          d.embed1.embed2.date._bsonType.should.equal('Date');
-          d.embed1.embed2.date.millis.should.equal(msDate);
-          d.embed1.embed2.embed3.date.should.not.be.instanceOf(Date);
-          d.embed1.embed2.embed3.date.should.have.property('_bsonType');
-          d.embed1.embed2.embed3.date.should.have.property('millis');
-          d.embed1.embed2.embed3.date._bsonType.should.equal('Date');
-          d.embed1.embed2.embed3.date.millis.should.equal(msDate);
+    // N/A: it('encodes embedded docs containing dates', function () {
+    // the only type of embedded doc in PostgreSQL is JSON which will convert date types to string
 
-        });
-    });
 
     it('decodes embedded docs containing dates', function () {
       var msDate = 132215400000;
@@ -197,9 +174,102 @@ describe('pgTestDatastore', function () {
       d.embed1.embed2.embed3.date.getTime().should.equal(msDate);
     });
 
+    it('reads and writes JSON', function () {
+      var src = _dbUtil.createDocs("foo", 1);
+      var date = new Date();
+      src[0].jsonval = { name:'foo', val:['bar','baz'], date:date, binaryval: png_buff};
+      return _dbUtil.insertDocs(_db, "TestCollection", src)
+        .then(function() {
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function(docs){
+          docs.length.should.equal(1);
+          var doc = docs[0];
+          doc.a.should.equal(1);
+          doc.b.should.equal(2);
+          doc.jsonval.should.eql(JSON.parse(JSON.stringify(src[0].jsonval)));
+          doc.name.should.equal('foo1');  //unmodified
+          doc._version.should.equal(1);
+          src[0].jsonval.name='foo2';
+          src[0].jsonval.val[1]='bang';
+          src[0].jsonval.binaryval=txt_buff;
+          var ops = {
+            $set: {
+              a: 99,
+              b: 5,
+              jsonval:src[0].jsonval,
+              _version: 2
+            }
+          };
+          var pk = {pk_one:doc.pk_one, pk_two:doc.pk_two, pk_three:doc.pk_three};
+          return _ds.updateDocumentByOperations(testUtil.createLowlaId(_dbName, 'TestCollection', pk), docs[0]._version,  ops);
+        }).then(function(newDoc){
+          newDoc.a.should.equal(99);
+          newDoc.b.should.equal(5);
+          newDoc.jsonval.should.eql(JSON.parse(JSON.stringify(src[0].jsonval)));
+          newDoc.name.should.equal('foo1');  //unmodified
+          newDoc._version.should.equal(2);
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function(docs) {
+          docs.length.should.equal(1);
+          docs[0].a.should.equal(99);
+          docs[0].b.should.equal(5);
+          docs[0].jsonval.should.eql(JSON.parse(JSON.stringify(src[0].jsonval)));
+          docs[0].name.should.equal('foo1');  //unmodified
+          docs[0]._version.should.equal(2);
+        });
+    });
+
+    it('reads and writes stringified JSON', function () {
+      //confirms that json inserted stringified into a data-type json column comes back as object/nested document.
+      var src = _dbUtil.createDocs("foo", 1);
+      var date = new Date();
+      var jsonObj = { name:'foo', val:['bar','baz'], date:date, binaryval: png_buff};
+      src[0].jsonval = JSON.stringify(jsonObj)
+      return _dbUtil.insertDocs(_db, "TestCollection", src)
+        .then(function() {
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function(docs){
+          docs.length.should.equal(1);
+          var doc = docs[0];
+          doc.a.should.equal(1);
+          doc.b.should.equal(2);
+          doc.jsonval.should.eql(JSON.parse(JSON.stringify(jsonObj)));
+          doc.name.should.equal('foo1');  //unmodified
+          doc._version.should.equal(1);
+          jsonObj.name='foo2';
+          jsonObj.val[1]='bang';
+          jsonObj.binaryval=txt_buff;
+          src[0].jsonval = JSON.stringify(jsonObj)
+          var ops = {
+            $set: {
+              a: 99,
+              b: 5,
+              jsonval:src[0].jsonval,
+              _version: 2
+            }
+          };
+          var pk = {pk_one:doc.pk_one, pk_two:doc.pk_two, pk_three:doc.pk_three};
+          return _ds.updateDocumentByOperations(testUtil.createLowlaId(_dbName, 'TestCollection', pk), docs[0]._version,  ops);
+        }).then(function(newDoc){
+          newDoc.a.should.equal(99);
+          newDoc.b.should.equal(5);
+          newDoc.jsonval.should.eql(JSON.parse(JSON.stringify(jsonObj)));
+          newDoc.name.should.equal('foo1');  //unmodified
+          newDoc._version.should.equal(2);
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function(docs) {
+          docs.length.should.equal(1);
+          docs[0].a.should.equal(99);
+          docs[0].b.should.equal(5);
+          docs[0].jsonval.should.eql(JSON.parse(JSON.stringify(jsonObj)));
+          docs[0].name.should.equal('foo1');  //unmodified
+          docs[0]._version.should.equal(2);
+        });
+    });
+
     it('encodes a binary (text)', function () {
       var txt = 'Encoded String';
-      var bin = new Binary(txt);
+      var bin = new Buffer(txt);
       var doc = { _id: '1234', a: 1, _version:1, val: bin};
       var d = _ds.encodeSpecialTypes(doc);
       d.val.encoded.should.equal('RW5jb2RlZCBTdHJpbmc=');
@@ -214,202 +284,249 @@ describe('pgTestDatastore', function () {
     });
 
     it('decodes a binary (image)', function () {
-      return testUtil.readFile('test.png').then(function(filedata) {
-        var bin = new Binary(filedata);
-        var doc = { _id: '1234', a: 1, _version: 1, val: { _bsonType: 'Binary', type: 0, encoded: bin.toString('base64') }};
-        var d = _ds.decodeSpecialTypes(doc);
-        d.val.should.have.property('_bsontype');
-        d.val.should.have.property('buffer');
-        d.val._bsontype.should.equal('Binary');
-        d.val.toString('base64').should.equal(bin.toString('base64'));
-      });
+      var doc = { _id: '1234', a: 1, _version: 1, val: { _bsonType: 'Binary', type: 0, encoded: png_buff.toString('base64') }};
+      var d = _ds.decodeSpecialTypes(doc);
+      d.val.should.be.instanceOf(Buffer)
+      d.val.should.eql(png_buff)
+      d.val.toString('base64').should.equal( png_buff.toString('base64'));
     });
 
-    it('encodes a binary (image)', function () {
-      return testUtil.readFile('test.png').then(function(filedata){
-        var bin = new Binary(filedata);
-        var doc = { _id: '1234', a: 1, _version:1, val:bin};
-        return _dbUtil.insertDocs(_db, "TestCollection", doc)
-          .then(function () {
-            return _dbUtil.findDocs(_db, 'TestCollection', {});
-          }).then(function (docs) {
-            var d = _ds.encodeSpecialTypes(docs[0]);
-            d.val.should.have.property('_bsonType');
-            d.val.should.have.property('encoded');
-            d.val._bsonType.should.equal('Binary');
-            d.val.encoded.should.equal(bin.toString('base64'));
-          });
-      });
+    it('encodes a binary, buffer (image)', function () {
+      var doc = {pk_one:'one', pk_two:2, pk_three:'3',  a: 1, _version:1, binaryval: png_buff};
+      return _dbUtil.insertDocs(_db, "TestCollection", [doc])
+        .then(function () {
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function (docs) {
+          var d = _ds.encodeSpecialTypes(docs[0]);
+          d.binaryval.should.have.property('_bsonType');
+          d.binaryval.should.have.property('encoded');
+          d.binaryval._bsonType.should.equal('Binary');
+          d.binaryval.encoded.should.equal(png_buff.toString('base64'));
+          return true;
+        });
+    });
+
+    it('encodes a binary created as HEX (image)', function () {
+      var hex = '\\x' + png_buff.toString('hex');
+      var doc = {pk_one:'one', pk_two:2, pk_three:'3',  a: 1, _version:1, binaryval: hex};
+      return _dbUtil.insertDocs(_db, "TestCollection", [doc])
+        .then(function () {
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function (docs) {
+          var d = _ds.encodeSpecialTypes(docs[0]);
+          d.binaryval.should.have.property('_bsonType');
+          d.binaryval.should.have.property('encoded');
+          d.binaryval._bsonType.should.equal('Binary');
+          d.binaryval.encoded.should.equal(png_buff.toString('base64'));
+          return true;
+        });
+    });
+
+    it('encode/decode roundtrip - buffer (image)', function () {
+      var doc = {pk_one:'one', pk_two:2, pk_three:'3',  a: 1, _version:1, binaryval: png_buff};
+      return _dbUtil.insertDocs(_db, "TestCollection", [doc])
+        .then(function () {
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function (docs) {
+          var d = _ds.encodeSpecialTypes(docs[0]);
+          d.binaryval.should.have.property('_bsonType');
+          d.binaryval.should.have.property('encoded');
+          d.binaryval._bsonType.should.equal('Binary');
+          d.binaryval.encoded.should.equal(png_buff.toString('base64'));
+          return d;
+        }).then(function(doc){
+          var d2 = _ds.decodeSpecialTypes(doc);
+          d2.binaryval.should.be.instanceOf(Buffer)
+          d2.binaryval.should.eql(png_buff)
+          //return testUtil.writeFile('testPngNew.png', d2.binaryval, 'binary');
+        });
+    });
+
+    it('encode/decode roundtrip - created as HEX (image)', function () {
+      var hex = '\\x' + png_buff.toString('hex');
+      var doc = {pk_one:'one', pk_two:2, pk_three:'3',  a: 1, _version:1, binaryval: hex};
+      return _dbUtil.insertDocs(_db, "TestCollection", [doc])
+        .then(function () {
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function (docs) {
+          var d = _ds.encodeSpecialTypes(docs[0]);
+          d.binaryval.should.have.property('_bsonType');
+          d.binaryval.should.have.property('encoded');
+          d.binaryval._bsonType.should.equal('Binary');
+          d.binaryval.encoded.should.equal(png_buff.toString('base64'));
+          return d;
+        }).then(function(doc){
+          var d2 = _ds.decodeSpecialTypes(doc);
+          d2.binaryval.should.be.instanceOf(Buffer)
+          d2.binaryval.should.eql(png_buff)
+          //return testUtil.writeFile('testPngNew.png', d2.binaryval, 'binary');
+        });
     });
 
     it('decodes embedded docs containing binaries (image)', function () {
-      return testUtil.readFile('test.png').then(function(filedata) {
-        var bin = new Binary(filedata);
-        var binField = { _bsonType: 'Binary', type: 0, encoded: bin.toString('base64') };
-        var doc = { _id: '1234', a: 1, _version: 1,
-          val: binField,
-          embed1:{ a: 1, val: binField,
-            embed2:{ a: 1, val: binField,
-              embed3:{a: 1, val: binField}
-            }
-          },
-          end:true
-        };
-        var d = _ds.decodeSpecialTypes(doc);
-        d.val.should.have.property('_bsontype');
-        d.val.should.have.property('buffer');
-        d.val._bsontype.should.equal('Binary');
-        d.val.toString('base64').should.equal(bin.toString('base64'));
-
-        d.embed1.val.should.have.property('_bsontype');
-        d.embed1.val.should.have.property('buffer');
-        d.embed1.val._bsontype.should.equal('Binary');
-        d.embed1.val.toString('base64').should.equal(bin.toString('base64'));
-        d.embed1.embed2.val.should.have.property('_bsontype');
-        d.embed1.embed2.val.should.have.property('buffer');
-        d.embed1.embed2.val._bsontype.should.equal('Binary');
-        d.embed1.embed2.val.toString('base64').should.equal(bin.toString('base64'));
-        d.embed1.embed2.embed3.val.should.have.property('_bsontype');
-        d.embed1.embed2.embed3.val.should.have.property('buffer');
-        d.embed1.embed2.embed3.val._bsontype.should.equal('Binary');
-        d.embed1.embed2.embed3.val.toString('base64').should.equal(bin.toString('base64'));
-
-      });
+      var binField = { _bsonType: 'Binary', type: 0, encoded: png_buff.toString('base64') };
+      var doc = { _id: '1234', a: 1, _version: 1,
+        val: binField,
+        embed1:{ a: 1, val: binField,
+          embed2:{ a: 1, val: binField,
+            embed3:{a: 1, val: binField}
+          }
+        },
+        end:true
+      };
+      var d = _ds.decodeSpecialTypes(doc);
+      d.val.should.be.instanceOf(Buffer);
+      d.val.should.eql(png_buff);
+      d.embed1.val.should.be.instanceOf(Buffer);
+      d.embed1.val.should.eql(png_buff);
+      d.embed1.embed2.val.should.be.instanceOf(Buffer);
+      d.embed1.embed2.val.should.eql(png_buff);
+      d.embed1.embed2.embed3.val.should.be.instanceOf(Buffer);
+      d.embed1.embed2.embed3.val.should.eql(png_buff);
+      d.embed1.embed2.embed3.val.toString('base64').should.equal(png_buff.toString('base64'));
     });
 
-    it('encodes embedded docs containing binaries (image)', function () {
-      return testUtil.readFile('test.png').then(function(filedata){
-        var bin = new Binary(filedata);
-        var doc = { _id: '1234', a: 1, _version:1, val:bin, embed1:{a: 1, val:bin, embed2:{a: 1, val:bin, embed3:{a: 1, val:bin}}}, end:true};
-        return _dbUtil.insertDocs(_db, "TestCollection", doc)
-          .then(function () {
-            return _dbUtil.findDocs(_db, 'TestCollection', {});
-          }).then(function (docs) {
-            var d = _ds.encodeSpecialTypes(docs[0]);
-            d.val.should.have.property('_bsonType');
-            d.val.should.have.property('encoded');
-            d.val._bsonType.should.equal('Binary');
-            d.val.encoded.should.equal(bin.toString('base64'));
-            d.embed1.val.should.have.property('_bsonType');
-            d.embed1.val.should.have.property('encoded');
-            d.embed1.val._bsonType.should.equal('Binary');
-            d.embed1.val.encoded.should.equal(bin.toString('base64'));
-            d.embed1.embed2.val.should.have.property('_bsonType');
-            d.embed1.embed2.val.should.have.property('encoded');
-            d.embed1.embed2.val._bsonType.should.equal('Binary');
-            d.embed1.embed2.val.encoded.should.equal(bin.toString('base64'));
-            d.embed1.embed2.embed3.val.should.have.property('_bsonType');
-            d.embed1.embed2.embed3.val.should.have.property('encoded');
-            d.embed1.embed2.embed3.val._bsonType.should.equal('Binary');
-            d.embed1.embed2.embed3.val.encoded.should.equal(bin.toString('base64'));
-          });
-      });
+    // N/A - it('encodes embedded docs containing binaries (image)', function () {
+    // the only type of embedded doc in PostgreSQL is JSON which will reinflate Buffer to number[]
+
+    it('upserts a document with special types', function () {
+      var msDate = 132215412345;
+      var previousVersion = undefined;  //trigger upsert.
+      var pk = {pk_one: 'aaa', pk_two: 7, pk_three: 'ccc'};
+      var ops = {
+        $set: _.clone(pk)
+      };
+      ops.$set.a = 98;
+      ops.$set.b = 7;
+      ops.$set.binaryval = { _bsonType: 'Binary', type: 0, encoded: png_buff.toString('base64') };
+      ops.$set.timestamp = {_bsonType: 'Date', millis: msDate }
+      ops = _ds.decodeSpecialTypes(ops);
+      return _ds.updateDocumentByOperations(testUtil.createLowlaId(_dbName, 'TestCollection', pk), previousVersion, ops)
+        .then(function (newDoc) {
+          newDoc.a.should.equal(98);
+          newDoc.b.should.equal(7);
+          newDoc.binaryval.toString('base64').should.equal(png_buff.toString('base64'));
+          newDoc.timestamp.should.be.instanceOf(Date);
+          newDoc.timestamp.getTime().should.equal(msDate);
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+
+        }).then(function (docs) {
+          docs.length.should.equal(1);
+          docs[0].a.should.equal(98);
+          docs[0].b.should.equal(7);
+          docs[0].binaryval.toString('base64').should.equal(png_buff.toString('base64'));
+          docs[0].timestamp.should.be.instanceOf(Date);
+          docs[0].timestamp.getTime().should.equal(msDate);
+        }).then(null, function (err) {
+          throw err;
+        });
+    });
+
+    it('creates a document with special types', function () {
+      var msDate = 132215400000;
+      var previousVersion = 0;
+      var pk = {pk_one: 'aaa', pk_two: 7, pk_three: 'ccc'};
+      var ops = {
+        $set: _.clone(pk)
+      };
+      ops.$set.a = 98;
+      ops.$set.b = 7;
+      ops.$set.binaryval = { _bsonType: 'Binary', type: 0, encoded: png_buff.toString('base64') };
+      ops.$set.timestamp = {_bsonType: 'Date', millis: msDate }
+      ops = _ds.decodeSpecialTypes(ops);
+      return _ds.updateDocumentByOperations(testUtil.createLowlaId(_dbName, 'TestCollection', pk), previousVersion, ops)
+        .then(function (newDoc) {
+          newDoc.a.should.equal(98);
+          newDoc.b.should.equal(7);
+          newDoc.binaryval.toString('base64').should.equal(png_buff.toString('base64'));
+          newDoc.timestamp.should.be.instanceOf(Date);
+          newDoc.timestamp.getTime().should.equal(msDate);
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+
+        }).then(function (docs) {
+          docs.length.should.equal(1);
+          docs[0].a.should.equal(98);
+          docs[0].b.should.equal(7);
+          docs[0].binaryval.toString('base64').should.equal(png_buff.toString('base64'));
+          docs[0].timestamp.should.be.instanceOf(Date);
+          docs[0].timestamp.getTime().should.equal(msDate);
+        }).then(null, function (err) {
+          throw err;
+        });
     });
 
     it("modifies a document but not it's binary", function () {
-      var bin;
-      return testUtil.readFile('test.txt').then(function (filedata) {
-        bin = new Binary(filedata);
-      }).then(function () {
-        var doc = { _id: '1234', a: 1, b: 2, _version: 1, val: bin};
-        return _dbUtil.insertDocs(_db, "TestCollection", doc)
-          .then(function () {
-            return _dbUtil.findDocs(_db, 'TestCollection', {});
-          }).then(function (docs) {
-            docs.length.should.equal(1);
-            var d = docs[0];
-            d.a.should.equal(1);
-            d.b.should.equal(2);
-            d._version.should.equal(1);
-            d.val.should.have.property('_bsontype');
-            d.val.should.have.property('buffer');
-            d.val._bsontype.should.equal('Binary');
-            d.val.toString('base64').should.equal(bin.toString('base64'));
-            var ops = {
-              $set: {
-                a: 99,
-                b: 5
-              }
-            };
-            return _ds.updateDocumentByOperations(testUtil.createLowlaId(_dbName, 'TestCollection', docs[0]._id), docs[0]._version, ops);
-          }).then(function (newDoc) {
-            newDoc.a.should.equal(99);
-            newDoc.b.should.equal(5);
-            newDoc.val.should.have.property('_bsontype');
-            newDoc.val.should.have.property('buffer');
-            newDoc.val._bsontype.should.equal('Binary');
-            newDoc.val.toString('base64').should.equal(bin.toString('base64'));
-            return _dbUtil.findDocs(_db, 'TestCollection', {});
-          }).then(function (docs) {
+      var doc = {pk_one:'one', pk_two:2, pk_three:'3',  a: 1, b:2, _version:1, binaryval: png_buff};
+      var pk = {pk_one:doc.pk_one, pk_two:doc.pk_two, pk_three:doc.pk_three};
+      return _dbUtil.insertDocs(_db, "TestCollection", [doc])
+        .then(function () {
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function (docs) {
+          docs.length.should.equal(1);
+          var d = docs[0];
+          d.a.should.equal(1);
+          d.b.should.equal(2);
+          d._version.should.equal(1);
+          d.binaryval.toString('base64').should.equal(png_buff.toString('base64'));
+          var ops = {
+            $set: {
+              a: 99,
+              b: 5
+            }
+          };
+          return _ds.updateDocumentByOperations(testUtil.createLowlaId(_dbName, 'TestCollection', pk), docs[0]._version, ops);
+        }).then(function (newDoc) {
+          newDoc.a.should.equal(99);
+          newDoc.b.should.equal(5);
+          newDoc.binaryval.toString('base64').should.equal(png_buff.toString('base64'));
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function (docs) {
 
-            docs.length.should.equal(1);
-            var d = docs[0];
-            d.a.should.equal(99);
-            d.b.should.equal(5);
-            d.val.should.have.property('_bsontype');
-            d.val.should.have.property('buffer');
-            d.val._bsontype.should.equal('Binary');
-            d.val.toString('base64').should.equal(bin.toString('base64'));
-          });
-      });
+          docs.length.should.equal(1);
+          var d = docs[0];
+          d.a.should.equal(99);
+          d.b.should.equal(5);
+          d.binaryval.toString('base64').should.equal(png_buff.toString('base64'));
+        });
     });
 
 
     it("modifies a document and it's binary", function () {
-      var bin;
-      var bin2;
-      return testUtil.readFile('test.txt').then(function (filedata) {
-        bin = new Binary(filedata);
-      }).then(function () {
-        return testUtil.readFile('test.png').then(function (filedata) {
-          bin2 = new Binary(filedata);
+      var doc = {pk_one: 'one', pk_two: 2, pk_three: '3', a: 1, b: 2, _version: 1, binaryval: png_buff};
+      var pk = {pk_one: doc.pk_one, pk_two: doc.pk_two, pk_three: doc.pk_three};
+      return _dbUtil.insertDocs(_db, "TestCollection", [doc])
+        .then(function () {
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function (docs) {
+          docs.length.should.equal(1);
+          var d = docs[0];
+          d.a.should.equal(1);
+          d.b.should.equal(2);
+          d._version.should.equal(1);
+          d.binaryval.toString('base64').should.equal(png_buff.toString('base64'));
+          var ops = {
+            $set: {
+              a: 99,
+              b: 5,
+              binaryval: {_bsonType: 'Binary', type: 0, encoded: txt_buff.toString('base64')}
+            }
+          };
+          ops = _ds.decodeSpecialTypes(ops);
+          return _ds.updateDocumentByOperations(testUtil.createLowlaId(_dbName, 'TestCollection', pk), docs[0]._version, ops);
+        }).then(function (newDoc) {
+          newDoc.a.should.equal(99);
+          newDoc.b.should.equal(5);
+          newDoc.binaryval.toString('base64').should.equal(txt_buff.toString('base64'));
+          return _dbUtil.findDocs(_db, 'TestCollection', {});
+        }).then(function (docs) {
+
+          docs.length.should.equal(1);
+          var d = docs[0];
+          d.a.should.equal(99);
+          d.b.should.equal(5);
+          d.binaryval.toString('base64').should.equal(txt_buff.toString('base64'));
         });
-      }).then(function () {
-        var doc = { _id: '1234', a: 1, b: 2, _version: 1, val: bin};
-        return _dbUtil.insertDocs(_db, "TestCollection", doc)
-          .then(function () {
-            return _dbUtil.findDocs(_db, 'TestCollection', {});
-          }).then(function (docs) {
-            docs.length.should.equal(1);
-            var d = docs[0];
-            d.a.should.equal(1);
-            d.b.should.equal(2);
-            d._version.should.equal(1);
-            d.val.should.have.property('_bsontype');
-            d.val.should.have.property('buffer');
-            d.val._bsontype.should.equal('Binary');
-            d.val.toString('base64').should.equal(bin.toString('base64'));
-            var ops = {
-              $set: {
-                a: 99,
-                b: 5,
-                val: { _bsonType: 'Binary', type: 0, encoded: bin2.toString('base64') }
-              }
-            };
-            ops = _ds.decodeSpecialTypes(ops);
-            return _ds.updateDocumentByOperations(testUtil.createLowlaId(_dbName, 'TestCollection', docs[0]._id), docs[0]._version, ops);
-          }).then(function (newDoc) {
-            newDoc.a.should.equal(99);
-            newDoc.b.should.equal(5);
-            newDoc.val.should.have.property('_bsontype');
-            newDoc.val.should.have.property('buffer');
-            newDoc.val._bsontype.should.equal('Binary');
-            newDoc.val.toString('base64').should.equal(bin2.toString('base64'));
-            return _dbUtil.findDocs(_db, 'TestCollection', {});
-          }).then(function (docs) {
-
-            docs.length.should.equal(1);
-            var d = docs[0];
-            d.a.should.equal(99);
-            d.b.should.equal(5);
-            d.val.should.have.property('_bsontype');
-            d.val.should.have.property('buffer');
-            d.val._bsontype.should.equal('Binary');
-            d.val.toString('base64').should.equal(bin2.toString('base64'));
-          });
-      });
     });
-
   });
 
   describe('Creates and modifies documents', function () {

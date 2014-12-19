@@ -10,6 +10,7 @@
   exports.createResultHandler = createResultHandler;
   exports.enableLongStackSupport = enableLongStackSupport;
   exports.readFile = readFile;
+  exports.writeFile = writeFile;
   exports.idToBase64 = idToBase64;
   exports.createLowlaId = createLowlaId;
   exports.NullLogger = NullLogger;
@@ -81,6 +82,17 @@
           return reject(err);
         }
         resolve( data );
+      });
+    });
+  }
+
+  function writeFile(path, data, encoding){
+    return new Promise(function(resolve, reject){
+      require('fs').writeFile(require('path').resolve(__dirname, path), data, encoding, function(err, data){
+        if(err){
+          return reject(err);
+        }
+        resolve( true );
       });
     });
   }
