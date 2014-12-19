@@ -64,15 +64,15 @@ describe('pgTestDatastore', function () {
     { name:'jsonval',
       dataType: 'json'}
   ];
-  var pks = ['pk_one', 'pk_two', 'pk_three'];
+  var primeKeys = ['pk_one', 'pk_two', 'pk_three'];
   beforeEach(function (done) {
     _dbUtil.removeAllCollections(_db)
       .then(function () {
-        return _dbUtil.createTestTable("TestCollection", cols, pks)
+        return _dbUtil.createTestTable("TestCollection", cols, primeKeys)
           .then(function(table){
-            return _dbUtil.createTestTable("TestCollection2", cols, pks)
+            return _dbUtil.createTestTable("TestCollection2", cols, primeKeys)
               .then(function(table){
-                _dbUtil.createTestTable("TestCollection3", cols, pks)
+                _dbUtil.createTestTable("TestCollection3", cols, primeKeys)
                   .then(function(table){
                     done();
                   })
@@ -618,42 +618,48 @@ describe('pgTestDatastore', function () {
         });
     });
 
-    it('creates a conflict', function () {
-      var seeds = _dbUtil.createDocs("foo", 1);
-      seeds[0]._version=2;
-      return _dbUtil.insertDocs(_db, "TestCollection", seeds)
-        .then(function() {
-          return _dbUtil.findDocs(_db, 'TestCollection', {});
-        }).then(function(docs){
-          docs.length.should.equal(1);
-          var doc = docs[0];
-          doc.a.should.equal(1);
-          doc.b.should.equal(2);
+    it('fails on conflicts', function() {
+      var pk = {pk_one:'one', pk_two:2, pk_three:'3'};
+      var key = testUtil.createLowlaId(_dbName, 'TestCollection', pk);
+      return _ds.updateDocumentByOperations(key, undefined, { $set: _.extend(pk, { a: 1, b: 2 }), $inc: { _version: 1 }})
+        .then(function(doc) {
+          doc._version.should.equal(1);
+          return _ds.updateDocumentByOperations(key, 1, { $set: _.extend(pk, { a: 2, b: 4 }), $inc: { _version: 1 }})
+        })
+        .then(function(doc) {
           doc._version.should.equal(2);
-          var oldVers = 1;
-          var ops = {
-            $set: {
-              a: 99,
-              b: 5,
-              name:'somthingelse',
-              _version: 2
-            }
-          };
-          var pk = {pk_one:doc.pk_one, pk_two:doc.pk_two, pk_three:doc.pk_three};
-          return _ds.updateDocumentByOperations(testUtil.createLowlaId(_dbName, 'TestCollection', pk), oldVers,  ops);
-        }).then(null, function(result){
-          if(!result.isConflict){
-            throw result;
-          }
-          result.isConflict.should.be.true;
-          should.not.exist(result.document);
-          return _dbUtil.findDocs(_db, 'TestCollection', {});
-        }).then(function(docs) {
-          docs.length.should.equal(1);
-          docs[0].a.should.equal(1);
-          docs[0].b.should.equal(2);
-          docs[0]._version.should.equal(2);
-          docs[0].name.should.equal('foo1');
+          doc.a.should.equal(2);
+          doc.b.should.equal(4);
+          return _ds.updateDocumentByOperations(key, 1, { $set: _.extend(pk, { a: 22, b: 44 }), $inc: { _version: 1 }});
+        })
+        .then(function() {
+          throw Error('Should not have resolved on conflict doc');
+        }, function(err) {
+          err.should.deep.equal({isConflict: true});
+        });
+    });
+
+    it('can force updates on otherwise conflicting ops', function() {
+      var pk = {pk_one:'one', pk_two:2, pk_three:'3'};
+      var key = testUtil.createLowlaId(_dbName, 'TestCollection', pk);
+      return _ds.updateDocumentByOperations(key, undefined, { $set: _.extend(pk, { a: 1, b: 2 }), $inc: { _version: 1 }})
+        .then(function(doc) {
+          doc._version.should.equal(1);
+          return _ds.updateDocumentByOperations(key, 1, { $set: _.extend(pk, { a: 2, b: 4 }), $inc: { _version: 1 }})
+        })
+        .then(function(doc) {
+          doc._version.should.equal(2);
+          doc.a.should.equal(2);
+          doc.b.should.equal(4);
+          return _ds.updateDocumentByOperations(key, 1, { $set: _.extend(pk, { a: 22, b: 44 }), $inc: { _version: 1 }}, true);
+        })
+        .then(function(doc) {
+          doc.a.should.equal(22);
+          doc.b.should.equal(44);
+          doc._version.should.equal(3);
+        }, function(err){
+          err.should.not.deep.equal({isConflict: true});
+          throw new Error(err);
         });
     });
 
@@ -672,6 +678,20 @@ describe('pgTestDatastore', function () {
           return _dbUtil.findDocs(_db, 'TestCollection', {});
         }).then(function(docs) {
           docs.length.should.equal(0);
+        });
+    });
+
+    it('conflicts if versions do not match', function() {
+      var pk = {pk_one:'one', pk_two:2, pk_three:'3'};
+      var key = testUtil.createLowlaId(_dbName, 'TestCollection', pk);
+      return _ds.updateDocumentByOperations(key, undefined, { $set: _.extend(pk, { a: 1, _version: 5 }) })
+        .then(function() {
+          return _ds.removeDocument(key, 3);
+        })
+        .then(function() {
+          throw Error('Should not have removed document!');
+        }, function(err) {
+          err.isConflict.should.equal(true);
         });
     });
 
@@ -1219,7 +1239,7 @@ describe('pgTestDatastore', function () {
             //verify it's empty
             result.rows.length.should.equal(0);
 
-            var q = _ds._createUpsertCTE('public', 'TestCollection', ops, pks);
+            var q = _ds._createUpsertCTE('public', 'TestCollection', ops, primeKeys);
             return _dbUtil.execQuery(q.query, q.values).then(function (result) {
               result.rows.length.should.equal(1);
               var retdoc = result.rows[0];
@@ -1241,7 +1261,7 @@ describe('pgTestDatastore', function () {
                 ops.$set.name = "an update through upsert"
                 var newTs = new Date();
                 ops.$set.timestamp = newTs;
-                q = _ds._createUpsertCTE('public', 'TestCollection', ops, pks);
+                q = _ds._createUpsertCTE('public', 'TestCollection', ops, primeKeys);
                 return _dbUtil.execQuery(q.query, q.values).then(function (result) {
 
                   result.rows.length.should.equal(1);
