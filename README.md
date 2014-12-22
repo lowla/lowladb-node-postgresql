@@ -44,6 +44,8 @@ The `PostgreSqlDatastore` constructor takes an optional configuration object.  T
 
 The PostgreSqlDatastore does not create tables.  Your database should contain the tables your app requires.
 
+Tables are currently assumed to be in the default 'public' schema; future releases will include additional support for schemas.
+
 The following DDL will create a table usable by the lowladb-demo-node project:
 
 ```SQL
