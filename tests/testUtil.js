@@ -63,7 +63,7 @@
 
   function createDocs (rootName, num){
     var docs = [];
-    for(i=1; i<=num; i++){
+    for(var i=1; i<=num; i++){
       docs.push({pk_one:'pk1', pk_two: i, pk_three:'pk3_'+ i, name: rootName + i, a: i, b: 2*i, _version:1})
     }
     return docs;
@@ -208,7 +208,7 @@
   function getIds(db, collectionName){
     return findDocs(db, collectionName).then(function(docs){
       var ids = [];
-      for (i in docs){
+      for (var i in docs){
         var id = {pk_one:docs[i].pk_one, pk_two:docs[i].pk_two, pk_three:docs[i].pk_three}
         ids.push(id);
       }
@@ -235,7 +235,7 @@
   function insertDocs(db, collectionName, docs) {
     return findTable(db, collectionName).then(function(table){
       var keys = Object.keys(docs[0]);
-      for(key in keys){
+      for(var key in keys){
         if(!table.hasColumn(keys[key])) {
           table.addColumn(keys[key]);
         }
@@ -260,7 +260,7 @@
         }
         var tables = result.rows
         //logger.verbose(tables);
-        for (t in tables) {
+        for (var t in tables) {
           ret.push(tables[t].schemaname + '.' + tables[t].tablename)
         }
         resolve(ret);

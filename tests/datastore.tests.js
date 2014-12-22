@@ -539,7 +539,7 @@ describe('pgTestDatastore', function () {
       ops.$set.a=98;
       ops.$set.b=7;
       ops.$set.name='foo';
-      versionPreUpdate = 0;  //new doc; adapter sets 0 if no prev version
+      var versionPreUpdate = 0;  //new doc; adapter sets 0 if no prev version
       return _ds.updateDocumentByOperations(testUtil.createLowlaId(_dbName, 'TestCollection', pk), versionPreUpdate, ops)
         .then(function (newDoc) {
           newDoc.a.should.equal(98);
@@ -728,7 +728,7 @@ describe('pgTestDatastore', function () {
       return _ds.getAllDocuments(h).then(function (result) {
         h.end();
         result.length.should.equal(3);
-        for (i in result) {
+        for (var i in result) {
           result[i].sent.should.equal(10);
           ["LowlaTest.public.TestCollection",
             "LowlaTest.public.TestCollection2",
@@ -736,7 +736,7 @@ describe('pgTestDatastore', function () {
         }
         var results = h.getResults();
         var collections = {};
-        for (i = 0; i < results.length; i++) {
+        for (var i = 0; i < results.length; i++) {
           results.length.should.equal(30);
           var lowlaIdComponents = _ds._componentsFromId(results[i].lowlaId);
           collections[lowlaIdComponents.collectionName]=true;
@@ -910,7 +910,7 @@ describe('pgTestDatastore', function () {
             function (table) {
               var oQuery = table.select(table.star());
               var pks =[];
-              for (col in table.columns){
+              for (var col in table.columns){
                 pks.push(table.columns[col].name);
               }
               return _ds._streamQueryResult(oQuery.toQuery(), 'TestCollection', pks, h);
@@ -1090,7 +1090,7 @@ describe('pgTestDatastore', function () {
             function (table) {
               var oQuery = table.select(table.star());
               var pks = [];
-              for (col in table.columns) {
+              for (var col in table.columns) {
                 pks.push(table.columns[col].name);
               }
               sinon.sandbox.stub(_ds.config.db, 'query').throws(new Error('cursor.stream error'));
