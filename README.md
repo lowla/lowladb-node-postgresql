@@ -40,6 +40,22 @@ The `PostgreSqlDatastore` constructor takes an optional configuration object.  T
 }
 ```
 
+## IDs ##
+
+Unlike the MongoDB-based datastores, which have a single-entity id (_id), PostgreSQL records can be identified by primary keys that contain multiple columns.  To support this, the `PostgreSqlDatastore` uses JavaScript objects to identify primary key columns and values. For example, the following object identifies a record based on the value of both columns 'col1' and 'col2':
+
+```js
+{
+  col1:'somevalue',
+  col2: 1234
+}
+```
+
+These id objects are stringified and converted to base-64 for use by LowlaDB as an opaque identifier.
+
+Client applications should create valid IDs for new documents.  An example of creating a simple ID for new documents in the demo application appears below.
+
+
 ## Required Database Tables ##
 
 The PostgreSqlDatastore does not create tables.  Your database should contain the tables your app requires.
@@ -65,6 +81,30 @@ ALTER TABLE todos
 ```
 
 The example uses the default postgres id as the table owner; modify as appropriate.
+
+In order to use the demo project with PostgreSQL, the IDs generated for new documents in the todos app will also need to be modified to support the ID format referenced above. In the 'App.create()' function in todomvc/js/app.js, the following code:
+
+
+```js
+{
+this.todos.insert({
+  id: util.uuid(),
+  title: val,
+  completed: false
+});
+```
+could be replaced as follows to generate a valid ID:
+
+```js
+var pk = { id: util.uuid() };
+var pk64 = btoa(JSON.stringify(pk));
+this.todos.insert({
+	_id: pk64,
+	id: pk.id,
+	title: val,
+	completed: false
+});
+```
 
 For lowladb-node to use PostgreSQL datastore for tracking sync events, the following tables should be defined as well:
 
